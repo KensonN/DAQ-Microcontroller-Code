@@ -81,7 +81,7 @@ int count = 0;
 void print_all_sensors() {
   //prints a single string containing all sensor values
   //to be decoded by python script
-  char output[] = ""
+  String output = "";
   //expect precision issues to # of digits
   //python script currently expects 2 digits per datum
 
