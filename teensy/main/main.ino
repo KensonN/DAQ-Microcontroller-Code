@@ -1,12 +1,18 @@
 #include <Wire.h>
 #include <SPI.h>
 
+//SD Card Library
+#include <SD.h>
+
 //#include "altimeter.h"
 //#include "thermometer.h"
 #include "gps.h"
 #include "gyroscope.h"
 #include "accelerometer.h"
 //#include "thermometer.h"
+
+File myFile;
+const int chipSelect = BUILTIN_SDCARD;
 
 //Function definitions
 void read_all_sensors();
@@ -36,6 +42,12 @@ void setup() {
   Serial.begin(115200);  // Start serial for output
   Serial1.begin(115200);  // Start serial for output
   Wire.begin();
+
+  if (!SD.begin(chipSelect)) {
+    Serial.println("initialization failed!");
+    return;
+  }
+
 //  myAltimeter = new Altimeter(0x6A);
 //  mySensors[0] = myAltimeter;
   myGps = new GPS(0x6B);
@@ -167,6 +179,19 @@ void print_all_sensors() {
   
   output.concat("^Count: ");
   output.concat(count);
+
+  myFile = SD.open("SMV.txt", FILE_WRITE);
+
+  if (myFile) {
+      Serial.print(output);
+      myFile.println(output);
+    // close the file:
+      myFile.close();
+      //Serial.println("done.");
+    } else {
+      // if the file didn't open, print an error:
+      Serial.println("error opening test.txt");
+    }
   
 //  count++;
 }
