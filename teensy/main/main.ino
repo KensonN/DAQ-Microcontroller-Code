@@ -1,12 +1,18 @@
 #include <Wire.h>
 #include <SPI.h>
 
+//SD Card Library
+#include <SD.h>
+
 //#include "altimeter.h"
 //#include "thermometer.h"
 #include "gps.h"
 #include "gyroscope.h"
 #include "accelerometer.h"
 //#include "thermometer.h"
+
+File myFile;
+const int chipSelect = BUILTIN_SDCARD;
 
 //Function definitions
 void read_all_sensors();
@@ -36,6 +42,12 @@ void setup() {
   Serial.begin(115200);  // Start serial for output
   Serial1.begin(115200);  // Start serial for output
   Wire.begin();
+
+  if (!SD.begin(chipSelect)) {
+    Serial.println("initialization failed!");
+    return;
+  }
+
 //  myAltimeter = new Altimeter(0x6A);
 //  mySensors[0] = myAltimeter;
   myGps = new GPS(0x6B);
@@ -81,28 +93,41 @@ int count = 0;
 void print_all_sensors() {
   //prints a single string containing all sensor values
   //to be decoded by python script
-
+  String output = "";
   //expect precision issues to # of digits
   //python script currently expects 2 digits per datum
 
   //GPS
   Serial1.print("^latitude:");
   Serial1.println(myGps->get_latitude());
+  output.concat("^latitude:");
+  output.concat(myGps->get_latitude());
 //  Serial1.print(";");
+
   Serial1.print("^longitude:");
   Serial1.println(myGps->get_longitude());
+  output.concat("^longitude:");
+  output.concat(myGps->get_longitude());
 //  Serial1.print(";");
 
   //Gyroscope
   Cartesian_Coordinates GyCoordinates = myGyroscope->get_sensor_coordinates();
   Serial1.print("^GyX:");
   Serial1.println(GyCoordinates.x);
+  output.concat("^GyX:");
+  output.concat(GyCoordinates.x);
+  
 //  Serial1.print(";");
   Serial1.print("^GyY:");
   Serial1.println(GyCoordinates.y);
+  output.concat("^GyY:");
+  output.concat(GyCoordinates.y);
+  
 //  Serial1.print(";");
   Serial1.print("^GyZ:");
   Serial1.println(GyCoordinates.z);
+  output.concat("^GyZ:");
+  output.concat(GyCoordinates.z);
 //  Serial1.print(";");
 
 //  Serial1.print("Alt:");
@@ -118,17 +143,28 @@ void print_all_sensors() {
 //  Serial1.print(";");
   Serial1.print("^speed:");
   Serial1.println(myGps->get_speed());
+  output.concat("^speed:");
+  output.concat(myGps->get_speed());
 //  Serial1.print(";");
-//
+
   Cartesian_Coordinates AcCoordinates = myAccelerometer->get_sensor_coordinates();
+  
   Serial1.print("^acceleration x:");
   Serial1.println(AcCoordinates.x);
+  output.concat("acceleration x:");
+  output.concat(AcCoordinates.x);
 //  Serial1.print(";");
+
   Serial1.print("^acceleration y:");
   Serial1.println(AcCoordinates.y);
+  output.concat("acceleration y:");
+  output.concat(AcCoordinates.y);
 //  Serial1.print(";");
+
   Serial1.print("^acceleration z:");
   Serial1.println(AcCoordinates.z);
+  output.concat("acceleration z:");
+  output.concat(AcCoordinates.z);
 //  Serial1.print(";");
 //  Serial.print("Count:");
 //  Serial.print(count);
@@ -140,5 +176,22 @@ void print_all_sensors() {
   Serial.println(count);
   count++;
   Serial1.println();
+  
+  output.concat("^Count: ");
+  output.concat(count);
+
+  myFile = SD.open("SMV.txt", FILE_WRITE);
+
+  if (myFile) {
+      Serial.print(output);
+      myFile.println(output);
+    // close the file:
+      myFile.close();
+      //Serial.println("done.");
+    } else {
+      // if the file didn't open, print an error:
+      Serial.println("error opening test.txt");
+    }
+  
 //  count++;
 }
