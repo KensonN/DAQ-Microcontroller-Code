@@ -83,12 +83,19 @@ void loop() {
 
 void read_all_sensors() {
 //  int time = millis();
+  unsigned int failSafeTime = 500;
   for (int i = 0; i < num_sensors; i++) {
-    mySensors[i]->read_sensor_value();
+    elapsedMillis waiting;
+    // Time out failsafe
+    while (waiting < failSafeTime) {
+      mySensors[i]->read_sensor_value();
 //    Serial1.println(millis()-time);
 //    time = millis();
+    }
+    waiting = 0;
   }
 }
+
 int count = 0;
 void print_all_sensors() {
   //prints a single string containing all sensor values
