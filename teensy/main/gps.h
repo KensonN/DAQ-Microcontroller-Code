@@ -1,22 +1,19 @@
 #ifndef GPS_H
 #define GPS_H
-#include "base_sensor.h"
+#include <SparkFun_u-blox_GNSS_Arduino_Library.h>
 
-class GPS: public Sensor
-{
-public:
-	GPS(const int &pin);
-
-	void read_sensor_value();
-
-	long get_latitude() const;
-	long get_longitude() const;
-	long get_speed() const;
-
-protected:
-	long m_latitude;
-	long m_longitude;
-	long m_speed;
+class GPS {
+  public:
+    GPS(int device);
+    void readValues();
+    double get_latitude();
+    double get_longitude();
+    double get_speed();
+  private:
+    SFE_UBLOX_GNSS gps;
+    double m_latitude;
+    double m_longitude;
+    double m_speed;
 };
 
 #endif

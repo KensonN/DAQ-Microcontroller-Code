@@ -1,197 +1,251 @@
-#include <Wire.h>
-#include <SPI.h>
 
-//SD Card Library
-#include <SD.h>
-
-//#include "altimeter.h"
-//#include "thermometer.h"
-#include "gps.h"
-#include "gyroscope.h"
-#include "accelerometer.h"
-//#include "thermometer.h"
+#include <Wire.h> //I2C library
+#include <SD.h> //SD card library
+#include "SMVcanbus.h" //CAN bus class
+#include "gps.h" //GPS class and functions
+#include "ids.h"
+#include <TimeLib.h>
+#include <DS1307RTC.h>  // a basic DS1307 library that returns time as a time_t
+#include <WString.h>
+#include <MAX6956.h>
 
 File myFile;
 const int chipSelect = BUILTIN_SDCARD;
 
-//Function definitions
-void read_all_sensors();
-void print_all_sensors();
+GPS gps(1);
+CANBUS can(DAQ);
 
-const int num_sensors = 3;
-Sensor* mySensors[num_sensors];
-//Altimeter* myAltimeter;
-GPS* myGps;
-Gyroscope* myGyroscope;
-Accelerometer* myAccelerometer;
-//Thermometer* myThermometer;
+//Bear 1
+double bear1_vals[] = {0, 0, 0, 0, 0, 0, 0};
+int bear1_count = 7;
 
-int hallEffectSensorPin = 0; // Hall sensor at pin 0
-unsigned int countsHES;
-unsigned int rpm; //unsigned gives only positive values
-unsigned long previoustimeHES;
+//Bear 2
+double bear2_vals[] = {0, 0, 0, 0, 0, 0, 0};
+int bear2_count = 7;
 
-void count_function()
-{ /*The ISR function
-Called on Interrupt
-Update counts*/
-countsHES++;
+//Power Control
+double powerControl_vals[] = {0, 0, 0, 0, 0, 0, 0, 0};
+int powerControl_count = 8;
+
+//Steering
+double steering_vals[] = {0, 0};
+int steering_count = 2;
+
+bool SDgood = true;
+char* fileName = "2023-04-02-T-18-22-30.txt";
+
+
+#define MAX6956_1 0x40 //AD0 GND, AD1 GND
+#define MAX6956_2 0x44 //AD0 GND, AD1 VCC
+#define BRIGHTNESS 0xFF // Max brightness
+MAX6956 max6956(MAX6956_1, MAX6956_2, BRIGHTNESS);
+
+void display() {
+  // Serial.print("RPM: ");
+  // Serial.println(bear1_vals[RPM]);
+  max6956.outputDigit(gps.get_speed(), 1);
+  // delay(50);
 }
 
 void setup() {
   Serial.begin(115200);  // Start serial for output
-  Serial1.begin(115200);  // Start serial for output
+  Serial2.begin(115200);  // Start serial for TX to ESP8266
   Wire.begin();
-
+  // Wire.setClock(100000);
+  // while (!Serial) ;
   if (!SD.begin(chipSelect)) {
-    Serial.println("initialization failed!");
-    return;
+    Serial.println("SD Card Initialization Failed!");
+    SDgood = false;
+    // return;
   }
-
-//  myAltimeter = new Altimeter(0x6A);
-//  mySensors[0] = myAltimeter;
-  myGps = new GPS(0x6B);
-  mySensors[0] = myGps;
-  myGyroscope = new Gyroscope(0x60);
-  mySensors[1] = myGyroscope;
-  myAccelerometer = new Accelerometer(0x60);
-  mySensors[2] = myAccelerometer;
-//  myThermometer = new Thermometer(0x60);
-//  mySensors[4] = myThermometer;
-
-  //Intiates Serial communications
-  attachInterrupt(digitalPinToInterrupt(hallEffectSensorPin), count_function, RISING); //Interrupts are called on Rise of Input
-  pinMode(hallEffectSensorPin, INPUT); //Sets sensor as input
-  countsHES = 0;
-  rpm = 0;
-  previoustimeHES = 0; //Initialise the values
-  
-  delay(1);
+  getFileName();
+  Serial.println("setup done");
 }
 
-void loop() {
-  read_all_sensors();
-  detachInterrupt(0); //Interrupts are disabled
-  rpm = 60*1000/(millis() - previoustimeHES)*countsHES;
-  previoustimeHES = millis(); //Resets the clock
-  countsHES = 0; //Resets the counter
-  
-  print_all_sensors();
-  
-  attachInterrupt(digitalPinToInterrupt(hallEffectSensorPin), count_function, RISING); //Counter restarted
-}
+long currentTime = 0;
 
-void read_all_sensors() {
-//  int time = millis();
-  for (int i = 0; i < num_sensors; i++) {
-    mySensors[i]->read_sensor_value();
-//    Serial1.println(millis()-time);
-//    time = millis();
+void loop() {  
+  listenToCAN();
+  gps.readValues();
+  display();
+  if (millis() - currentTime > 100) {
+    printValues();
+    currentTime = millis();
   }
 }
-int count = 0;
-void print_all_sensors() {
-  //prints a single string containing all sensor values
-  //to be decoded by python script
-  String output = "";
-  //expect precision issues to # of digits
-  //python script currently expects 2 digits per datum
 
-  //GPS
-  Serial1.print("^latitude:");
-  Serial1.println(myGps->get_latitude());
-  output.concat("^latitude:");
-  output.concat(myGps->get_latitude());
-//  Serial1.print(";");
+void getFileName() {
+  setSyncProvider(getTeensy3Time);   // the function to get the time from the RTC
+  if(timeStatus()!= timeSet) {
+    Serial.println("Unable to sync with the RTC");
+  }
+  else {
+    Serial.println("RTC has set the system time");
+  }
+  String fileNameStr = "";
+  fileNameStr.concat(year());
+  fileNameStr.concat("-");
+  if (month() < 10) {
+    fileNameStr.concat("0");
+  }
+  fileNameStr.concat(month());
+  fileNameStr.concat("-");
+  if (day() < 10) {
+    fileNameStr.concat("0");
+  }
+  fileNameStr.concat(day());
+  fileNameStr.concat("-");
+  fileNameStr.concat("T");
+  fileNameStr.concat("-");
+  if (hour() < 10) {
+    fileNameStr.concat("0");
+  }
+  fileNameStr.concat(hour());
+  fileNameStr.concat("-");
+  if (minute() < 10) {
+    fileNameStr.concat("0");
+  }
+  fileNameStr.concat(minute());
+  fileNameStr.concat("-");
+  if (second() < 10) {
+    fileNameStr.concat("0");
+  }
+  fileNameStr.concat(second());
+  fileNameStr.concat(".txt");
+  fileNameStr.toCharArray(fileName, 26);
+  Serial.println(fileName);
+}
 
-  Serial1.print("^longitude:");
-  Serial1.println(myGps->get_longitude());
-  output.concat("^longitude:");
-  output.concat(myGps->get_longitude());
-//  Serial1.print(";");
+time_t getTeensy3Time()
+{
+  return Teensy3Clock.get();
+}
 
-  //Gyroscope
-  Cartesian_Coordinates GyCoordinates = myGyroscope->get_sensor_coordinates();
-  Serial1.print("^GyX:");
-  Serial1.println(GyCoordinates.x);
-  output.concat("^GyX:");
-  output.concat(GyCoordinates.x);
-  
-//  Serial1.print(";");
-  Serial1.print("^GyY:");
-  Serial1.println(GyCoordinates.y);
-  output.concat("^GyY:");
-  output.concat(GyCoordinates.y);
-  
-//  Serial1.print(";");
-  Serial1.print("^GyZ:");
-  Serial1.println(GyCoordinates.z);
-  output.concat("^GyZ:");
-  output.concat(GyCoordinates.z);
-//  Serial1.print(";");
+void listenToCAN() {
+  can.looper();
+  if (can.isThere()) {
+    String canDevice = can.getHardware();
+    String canDataType = can.getDataType();
+    double canData = can.getData();
+    // Serial.print(canDevice);
+    // Serial.print(" ");
+    // Serial.print(canDataType);
+    // Serial.print(" ");
+    // Serial.print(canData);
+    // Serial.println(";");
+    if (canDevice == "Bear 1") {
+      for (int i = 0; i < bear1_count; i++) {
+        if (canDataType == motorMessage[i]) {
+          bear1_vals[i] = canData;
+        } 
+      }
+    }
+    else if (canDevice == "Bear 2") {
+      for (int i = 0; i < bear2_count; i++) {
+        if (canDataType == motorMessage[i]) {
+          bear2_vals[i] = canData;
+        } 
+      }
+    } 
+    else if (canDevice == "Power Control") {
+      for (int i = 0; i < powerControl_count; i++) {
+        if (canDataType == powerMessage[i]) {
+          powerControl_vals[i] = canData;
+        } 
+      }
+    }
+    else if (canDevice == "Steering Wheel") {
+      for (int i = 0; i < steering_count; i++) {
+        if (canDataType == steeringMessage[i]) {
+          steering_vals[i] = canData;
+        }
+      }
+    }
+    else {
+      Serial.print("Unknown device...");
+    }
+  }
+}
 
-//  Serial1.print("Alt:");
-//  Serial1.print(myAltimeter->get_raw_value()+27);
-//  Serial1.print(";");
-//  Serial1.print("Tem:");
-//  Serial1.print(myAltimeter->get_sensor_value()-11);
-//  Serial1.print(";");
+void printValues() {
+  String toSD;
+  toSD.concat(millis());
+  toSD.concat(": ");
+  // GPS
+  double gps_latitude = gps.get_latitude();
+  Serial2.print("^GPS latitude:");
+  Serial2.println(gps_latitude, 7);
+  toSD += String(gps_latitude,7);
+  toSD.concat(";");
 
-  //hall effect
-//  Serial1.print("Rpm:");
-//  Serial1.print(rpm); //Calculated values are displayed
-//  Serial1.print(";");
-  Serial1.print("^speed:");
-  Serial1.println(myGps->get_speed());
-  output.concat("^speed:");
-  output.concat(myGps->get_speed());
-//  Serial1.print(";");
+  double gps_longitude = gps.get_longitude();
+  Serial2.print("^GPS longitude:");
+  Serial2.println(gps_longitude, 7);
+  toSD += String(gps_longitude, 7);
+  toSD.concat(";");
 
-  Cartesian_Coordinates AcCoordinates = myAccelerometer->get_sensor_coordinates();
-  
-  Serial1.print("^acceleration x:");
-  Serial1.println(AcCoordinates.x);
-  output.concat("acceleration x:");
-  output.concat(AcCoordinates.x);
-//  Serial1.print(";");
+  double gps_speed = gps.get_speed();
+  Serial2.print("^GPS speed:");
+  Serial2.println(gps_speed);
+  toSD.concat(gps_speed);
+  toSD.concat(";");
 
-  Serial1.print("^acceleration y:");
-  Serial1.println(AcCoordinates.y);
-  output.concat("acceleration y:");
-  output.concat(AcCoordinates.y);
-//  Serial1.print(";");
+  for (int i = 0; i < bear1_count; i++) {
+    Serial2.print("^Bear 1 ");
+    Serial2.print(motorMessage[i]);
+    Serial2.print(":");
+    Serial2.println(bear1_vals[i]);
 
-  Serial1.print("^acceleration z:");
-  Serial1.println(AcCoordinates.z);
-  output.concat("acceleration z:");
-  output.concat(AcCoordinates.z);
-//  Serial1.print(";");
-//  Serial.print("Count:");
-//  Serial.print(count);
-//  Serial.print(";");
-//  Serial.print("Time:");
-//  Serial.print(millis());
-  Serial1.print("^Count: ");
-  Serial1.print(count);
-  Serial.println(count);
-  count++;
-  Serial1.println();
-  
-  output.concat("^Count: ");
-  output.concat(count);
+    toSD.concat(bear1_vals[i]);
+    toSD.concat(";");
+  }
 
-  myFile = SD.open("SMV.txt", FILE_WRITE);
+  for (int i = 0; i < bear2_count; i++) {
+    Serial2.print("^Bear 2 ");
+    Serial2.print(motorMessage[i]);
+    Serial2.print(":");
+    Serial2.println(bear2_vals[i]);
 
-  if (myFile) {
-      Serial.print(output);
-      myFile.println(output);
+    toSD.concat(bear2_vals[i]);
+    toSD.concat(";");
+  }
+
+  for (int i = 0; i < powerControl_count; i++) {
+    Serial2.print("^Power Control ");
+    Serial2.print(powerMessage[i]);
+    Serial2.print(":");
+    Serial2.println(powerControl_vals[i]);
+
+    toSD.concat(powerControl_vals[i]);
+    toSD.concat(";");
+  }
+
+  for (int i = 0; i < steering_count; i++) {
+    Serial2.print("^Steering ");
+    Serial2.print(steeringMessage[i]);
+    Serial2.print(":");
+    Serial2.println(steering_vals[i]);
+
+    toSD.concat(steering_vals[i]);
+    toSD.concat(";");
+  }
+  // Serial.print("SD: ");
+  // Serial.println(toSD);
+  //SD CARD
+  if (SDgood) {
+    myFile = SD.open(fileName, FILE_WRITE);
+    // Serial.print(myFile);
+    // Serial.println(myFile);
+    if (myFile) {
+      Serial.print("SD: ");
+      Serial.println(toSD);
+      myFile.println(toSD);
     // close the file:
       myFile.close();
-      //Serial.println("done.");
-    } else {
-      // if the file didn't open, print an error:
-      Serial.println("error opening test.txt");
+    } 
+    else {
+        // if the file didn't open, print an error:
+        Serial.println("error opening file");
     }
-  
-//  count++;
+  }
 }
